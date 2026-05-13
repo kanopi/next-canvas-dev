@@ -1,82 +1,140 @@
 # next-canvas-dev
 
-A local Drupal + DDEV environment that wires together the four split repos behind [`drupal-canvas-nextjs`](https://github.com/kanopi/drupal-canvas-nextjs). Use this when you need to verify the full stack — recipe + module + front end — works end-to-end.
+Scripts and documentation for standing up a Drupal CMS site that consumes the [`drupal/ui`](https://www.drupal.org/project/ui) and [`kanopi/nextjs`](https://github.com/kanopi/nextjs) recipes, and pairing it with the [`kanopi/drupal-canvas-nextjs`](https://github.com/kanopi/drupal-canvas-nextjs) front end.
 
-This repo is the **integration sandbox**, not a production template. It pulls the other four packages in via composer **path repositories** so any edit you make in a sibling clone shows up here immediately, no publish step required.
+This repo contains **no Drupal site of its own** — running `bootstrap.sh` creates a fresh Drupal CMS install in a directory you pick (default: `~/Projects/canvas-test`). That mirrors exactly what a real consumer of the recipes would do, so the bootstrap doubles as an integration test.
 
-## Expected layout on disk
+## Prerequisites
 
-```
-~/Projects/
-  drupal-canvas-nextjs/   ← Next.js front end
-  ui/                     ← drupal/ui recipe
-  nextjs/                 ← kanopi/nextjs recipe
-  next_canvas/            ← kanopi/next_canvas module
-  next-canvas-dev/        ← THIS repo
-```
+- [DDEV](https://ddev.com/) ≥ 1.25 (Docker required)
+- Node.js 20+ and `npm` (for the front end)
+- `git`
+- `~/Projects/drupal-canvas-nextjs/` cloned (or wherever you keep the front end)
 
-The `scripts/bootstrap.sh` script clones any missing siblings into `../` and brings everything up.
+## Default: consumer-style install
 
-## First-time bootstrap
+This is the recommended path. It tests the recipes the same way a stranger off the internet would consume them: standard Drupal CMS startup, then `composer require` our recipe via its published location.
 
 ```bash
-git clone https://github.com/kanopi/next-canvas-dev ~/Projects/next-canvas-dev
+git clone https://github.com/kanopi/next-canvas-dev.git ~/Projects/next-canvas-dev
 cd ~/Projects/next-canvas-dev
 ./scripts/bootstrap.sh
 ```
 
-This will:
-
-1. Clone the four sibling repos into `../` if they aren't already there.
-2. `ddev start` (project name: `next-canvas-dev`).
-3. `ddev composer install` — resolves the recipes + module from the sibling path repos.
-4. Apply the `nextjs` recipe (which transitively applies `ui` and enables `next_canvas`).
-5. Generate Simple OAuth keys for Canvas CLI auth.
-
-After bootstrap, Drupal is at `https://next-canvas-dev.ddev.site`.
-
-## Run the front end
+What it does, step by step (following [the standard Drupal CMS startup](https://www.drupal.org/docs/drupal-cms/install)):
 
 ```bash
-./scripts/sync-front-end.sh
+mkdir ~/Projects/canvas-test && cd ~/Projects/canvas-test
+ddev config --project-type=drupal11 --docroot=web --project-name=canvas-test
+ddev start
+ddev composer create-project drupal/cms
+
+# add Kanopi-hosted recipe + module (until they move to drupal.org)
+ddev composer config repositories.kanopi-nextjs      vcs https://github.com/kanopi/nextjs
+ddev composer config repositories.kanopi-next_canvas vcs https://github.com/kanopi/next_canvas
+
+# pull in our recipe (transitively pulls drupal/ui from drupal.org)
+ddev composer require kanopi/nextjs
+
+# apply the recipe
+ddev drush recipe recipes/contrib/nextjs -y
+
+# generate Simple OAuth keys for Canvas CLI
+ddev exec mkdir -p /var/www/html/keys
+ddev drush simple-oauth:generate-keys /var/www/html/keys
+ddev drush config:set simple_oauth.settings public_key  /var/www/html/keys/public.key  -y
+ddev drush config:set simple_oauth.settings private_key /var/www/html/keys/private.key -y
 ```
 
-This copies `.env.example` → `.env.local`, runs `npm install` if needed, then `npm run dev` with `NEXT_PUBLIC_DRUPAL_BASE_URL` pointed at this DDEV site. Front end at `http://localhost:3000`.
+Drupal CMS is up at `https://canvas-test.ddev.site`. Use `ddev drush uli` to grab a one-time admin login.
 
-## Daily development loop
+### Then the front end
 
 ```bash
-# Edit a component in the front end repo
+cd ~/Projects/drupal-canvas-nextjs
+echo 'NEXT_PUBLIC_DRUPAL_BASE_URL=https://canvas-test.ddev.site' >  .env.local
+echo 'CANVAS_SITE_URL=https://canvas-test.ddev.site'             >> .env.local
+npm install
+npm run dev
+```
+
+Open `http://localhost:3000`. Or just run `./scripts/sync-front-end.sh` from this repo and skip the manual env / install steps.
+
+## Dev mode: composer path repositories
+
+Use this when you're actively editing the recipes / module and want changes to flow in without a publish step. Requires sibling clones of `ui`, `nextjs`, and `next_canvas`.
+
+```bash
+cd ~/Projects   # so siblings live here
+git clone https://git.drupalcode.org/project/ui.git
+git clone https://github.com/kanopi/nextjs.git
+git clone https://github.com/kanopi/next_canvas.git
+
+cd ~/Projects/next-canvas-dev
+./scripts/bootstrap.sh --siblings
+```
+
+The `--siblings` flag swaps the VCS repositories for path repositories pointing at `../ui`, `../nextjs`, `../next_canvas`, and adds a docker-compose override that mounts the host paths into the DDEV web container. Edits in any of the sibling clones are visible to the running Drupal site immediately. Re-apply with:
+
+```bash
+cd ~/Projects/canvas-test
+ddev drush recipe recipes/contrib/nextjs -y
+```
+
+## Daily dev loop (with siblings)
+
+```bash
+# Edit a Canvas component
 cd ~/Projects/drupal-canvas-nextjs
 $EDITOR src/components/canvas/button/index.tsx
 
-# Push to Drupal
-npx canvas push --site-url https://next-canvas-dev.ddev.site
+# Push to the dev Drupal
+npx canvas push --site-url https://canvas-test.ddev.site
 
 # Sync the resulting config back into the ui recipe checkout
-npm run canvas:sync-recipe -- --recipe-path ../ui
+npm run canvas:sync-recipe -- --recipe-path ~/Projects/ui
 
 # Review and commit in each repo that has changes
 cd ~/Projects/drupal-canvas-nextjs && git status
 cd ~/Projects/ui && git status
 ```
 
-Because everything is path-repo'd, changes in `../ui` reapply instantly via `ddev drush recipe recipes/contrib/ui -y` — no composer reinstall needed.
-
-## Why a separate dev repo?
-
-The four production repos (`drupal-canvas-nextjs`, `ui`, `nextjs`, `next_canvas`) are intentionally minimal: each ships only what it owns. None of them carries a Drupal site, a DDEV config, or composer scaffolding. That makes them small, fast to clone, and easy to publish.
-
-This repo provides the working Drupal install needed to actually run them together. It carries the DDEV config, the composer scaffold, and the bootstrap automation. It is the answer to "how do I develop on the stack."
-
-## Tearing down
+## Stopping and restarting
 
 ```bash
-ddev delete next-canvas-dev -O
-rm -rf web/ vendor/ composer.lock
+# Stop everything
+cd ~/Projects/canvas-test && ddev stop
+# Ctrl+C in the npm run dev terminal
+
+# Bring it back up later
+cd ~/Projects/canvas-test && ddev start
+cd ~/Projects/drupal-canvas-nextjs && npm run dev
 ```
 
-A re-run of `./scripts/bootstrap.sh` rebuilds from scratch.
+## Tearing down completely
+
+```bash
+cd ~/Projects/canvas-test
+ddev delete canvas-test -O   # removes containers + database
+cd ..
+rm -rf canvas-test           # removes the Drupal install
+# Sibling clones (ui, nextjs, next_canvas, drupal-canvas-nextjs) untouched
+```
+
+`./scripts/bootstrap.sh` will rebuild from scratch.
+
+## Why this repo exists
+
+The four production repos (`drupal-canvas-nextjs`, `ui`, `nextjs`, `next_canvas`) are intentionally minimal — each ships only what it owns, none of them carries a Drupal site or DDEV config. This repo is the small launcher that wires them together for dev and verification work.
+
+## Related repos
+
+| | |
+|---|---|
+| [`kanopi/drupal-canvas-nextjs`](https://github.com/kanopi/drupal-canvas-nextjs) | Next.js front end |
+| [`drupal/ui`](https://www.drupal.org/project/ui) | UI recipe |
+| [`kanopi/nextjs`](https://github.com/kanopi/nextjs) | NextJS site template recipe |
+| [`kanopi/next_canvas`](https://github.com/kanopi/next_canvas) | Decoupled bridge module |
 
 ## License
 
