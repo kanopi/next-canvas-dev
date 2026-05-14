@@ -11,6 +11,8 @@ This repo contains **no Drupal site of its own** — running `bootstrap.sh` crea
 - `git`
 - `~/Projects/drupal-canvas-nextjs/` cloned (or wherever you keep the front end)
 
+DDEV installs the `mkcert` local CA into your system trust store automatically the first time you run `ddev start`. If you've never used DDEV on this machine, run `mkcert -install` once (it'll prompt for sudo). Verify with `mkcert -CAROOT`. Without it, Node.js running against `*.ddev.site` URLs may hang or refuse to trust the cert.
+
 ## Default: consumer-style install
 
 This is the recommended path. It tests the recipes the same way a stranger off the internet would consume them: standard Drupal CMS startup, then `composer require` our recipe via its published location.
@@ -122,6 +124,20 @@ rm -rf canvas-test           # removes the Drupal install
 ```
 
 `./scripts/bootstrap.sh` will rebuild from scratch.
+
+## Troubleshooting
+
+**Next.js requests to `*.ddev.site` hang or fail with cert errors.**
+Run `mkcert -install` once (sudo needed). Then verify with `mkcert -CAROOT`. Restart the Next.js dev server.
+
+**`composer require kanopi/nextjs` fails with "Could not find a version … matching your minimum-stability (stable)".**
+The bootstrap script sets `minimum-stability=dev` after `composer create-project`. If you're running the steps manually, run `ddev composer config minimum-stability dev` before requiring. None of the three recipes have tagged releases yet — they ship dev-only.
+
+**Recipe apply fails with "There were errors validating the config synchronization".**
+Usually a transient warning during recipe apply about modules that can't be uninstalled cleanly because they have content. The real failure (if any) appears in a later line. If `drush recipe` exits non-zero, scroll up past the warning block for the actual error.
+
+**`/home` returns 404.**
+Confirm the canvas_page imported with its alias: `ddev drush sqlq "SELECT alias FROM path_alias_field_data WHERE path LIKE '/canvas_page/%'"`. Should show `/home`. If not, re-run `ddev drush recipe`.
 
 ## Why this repo exists
 
