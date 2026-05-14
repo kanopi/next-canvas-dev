@@ -99,12 +99,19 @@ services:
 COMPOSE
   ddev restart
 else
-  echo "==> Wiring composer VCS repositories for Kanopi-hosted packages"
+  echo "==> Wiring composer VCS repositories for Kanopi-hosted + drupal/ui (dev-only)"
   ddev composer config repositories.kanopi-nextjs      vcs https://github.com/kanopi/nextjs
   ddev composer config repositories.kanopi-next_canvas vcs https://github.com/kanopi/next_canvas
+  # drupal/ui has no tagged release on d.o yet; pull dev from gitlab. Each repo's
+  # composer.json carries a branch-alias (dev-main -> 1.x-dev) so ^1 resolves.
+  ddev composer config repositories.drupal-ui          vcs https://git.drupalcode.org/project/ui
+
+  echo "==> Setting minimum-stability=dev (no tagged releases yet on our recipes)"
+  ddev composer config minimum-stability dev
+  ddev composer config prefer-stable true
 fi
 
-echo "==> Requiring kanopi/nextjs (this pulls drupal/ui and kanopi/next_canvas transitively)"
+echo "==> Requiring kanopi/nextjs (transitively pulls drupal/ui + kanopi/next_canvas)"
 ddev composer require kanopi/nextjs
 
 echo "==> Applying the nextjs recipe"
