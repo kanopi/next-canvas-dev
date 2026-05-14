@@ -114,6 +114,13 @@ fi
 echo "==> Requiring kanopi/nextjs (transitively pulls drupal/ui + kanopi/next_canvas)"
 ddev composer require kanopi/nextjs
 
+echo "==> Installing Drupal (minimal profile — we layer the recipe on top)"
+# composer create-project drupal/cms doesn't actually install Drupal; it only
+# stages the codebase. The Drupal CMS distribution expects the user to visit
+# the site and walk a wizard. For a scripted bootstrap we use the minimal
+# profile and then apply our recipe on top — same end state.
+ddev drush site:install minimal --account-name=admin --account-pass=admin -y
+
 echo "==> Applying the nextjs recipe"
 ddev drush recipe recipes/contrib/nextjs -y
 
